@@ -8,12 +8,11 @@ rrcos_filt = rcosdesign(rrcos_filt_beta, rrcos_filt_len, oversampl);
 
 bits_per_symb = 4;
 bits_per_item = 8;
-data = randi(2^bits_per_item - 1, 1, 10);
+data = randi(2^bits_per_item - 1, 1, 100);
 barker_code13 = [+1 +1 +1 +1 +1 -1 -1 +1 +1 -1 +1 -1 +1];
 barker_symbs = barker_code13 + i*barker_code13;
 
 bin_symbs = symbolify(data, bits_per_item, bits_per_symb);
-barker_code_txed = transmitter(barker_symbs, oversampl, flo, rrcos_filt);
 
 points_per_axis = 2^(bits_per_symb/2);
 qam16_matrix = (-1:2/(points_per_axis-1):1) + (i*(-1:2/(points_per_axis-1):1)');
@@ -27,10 +26,9 @@ data_recieved = awgn([some_random_offset data_to_send], 20); % do I even need HW
 
 df = 1;
 some_phase = 0;
-t_rx = linspace(0, length(data_recieved)/flo/oversampl,length(data_recieved));
 
-lo_i = sin(2*pi*flo*df*t_rx+some_phase);
-lo_q = cos(2*pi*flo*df*t_rx+some_phase);
+lo_i = sin(2*pi*flo*df*t_tx+some_phase);
+lo_q = cos(2*pi*flo*df*t_tx+some_phase);
 b = fir1(2*flo,1/flo);
 rx_with_lo = data_recieved .* lo_i + 1j*data_recieved .* lo_q;
 
