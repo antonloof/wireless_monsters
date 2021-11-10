@@ -8,10 +8,10 @@ rrcos_filt = rcosdesign(rrcos_filt_beta, rrcos_filt_len, oversampl);
 
 bits_per_symb = 4;
 bits_per_item = 8;
-data = randi(2^bits_per_item - 1, 1, 10);
-data = [10 20 30 40 50 60 70 80 90];
+data = randi(2^bits_per_item - 1, 1, 100);
+data = 'kalle anka';
 barker_code13 = [+1 +1 +1 +1 +1 -1 -1 +1 +1 -1 +1 -1 +1];
-barker_symbs = barker_code13 + i*barker_code13;
+barker_symbs = (1+i)*barker_code13;
 
 bin_symbs = symbolify(data, bits_per_item, bits_per_symb);
 
@@ -20,32 +20,40 @@ qam16_matrix = (-1:2/(points_per_axis-1):1) + (i*(-1:2/(points_per_axis-1):1)');
 qam16_lookup = reshape(qam16_matrix.',1,[]);
 
 symbs = qam16_lookup(bin_symbs+1);
-symbs_with_barker = [zeros(1, 100) barker_symbs symbs];
-[data_to_send, t_tx] = transmitter(symbs_with_barker, oversampl, flo, rrcos_filt);
+packet_header = [barker_symbs zeros(1, oversampl-1)];
+packet_header = [];
+packet = [packet_header symbs];
+[data_to_send, t_tx] = transmitter(packet, oversampl, flo, rrcos_filt);
+
+% hw simulator
 some_random_offset = zeros(1, (randi(100) + 10) * flo);
-some_random_offset = zeros(1, 100*oversampl*flo);
+some_random_offset = zeros(1, 0*oversampl*flo);
 data_recieved = awgn([some_random_offset data_to_send], 20); % do I even need HW?
 data_recieved = [some_random_offset data_to_send];
 
 df = 1;
 some_phase = 0;
-t_rx = linspace(0, length(data_recieved)/flo/oversampl,length(data_recieved));
+t_rx = linspace(1, length(data_recieved)/flo/oversampl, length(data_recieved));
 lo_i = sin(2*pi*flo*df*t_rx+some_phase);
 lo_q = cos(2*pi*flo*df*t_rx+some_phase);
-
-b = fir1(2*flo,1/2, 'low');
+plot(t_rx, lo_i);
+b = fir1(2*flo,2/flo, 'low');
 rx_with_lo = data_recieved .* lo_i + 1j*data_recieved .* lo_q;
-
 rx_high_sample = upfirdn(b, rx_with_lo, 1, flo);
+plot(linspace(1, length(symbs), length(rx_high_sample)), real(rx_high_sample))
+barker_upsampled = upfirdn(barker_symbs, rrcos_filt, oversampl);
+packet_upsampled = upfirdn(packet, rrcos_filt, oversampl);
 
-baker_symbs_upsampled = upfirdn(barker_symbs, rrcos_filt, oversampl, 1);
-all_symbs_upsampled = upfirdn(symbs_with_barker, rrcos_filt, oversampl, 1);
-
-baker_filter = flip(barker_symbs);
-
+figure
 hold on
-plot(abs(filtfilt(baker_filter, 1, symbs_with_barker)))
-plot(abs(xcorr(symbs_with_barker, barker_symbs)))
+plot(abs(xcorr(barker_upsampled, packet_upsampled)))
+plot(real(packet_upsampled))
+plot(real(barker_upsampled), 'o')
+
+%figure 
+%hold on
+%plot(linspace(0,length(packet_upsampled),length(rx_with_lo)), real(rx_with_lo))
+%plot(real(rx_high_sample))
 
 rx = upfirdn(rrcos_filt, rx_high_sample, 1, oversampl);
 rx_shift = rx((rrcos_filt_len + 1):(end - rrcos_filt_len));
