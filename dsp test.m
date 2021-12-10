@@ -3,15 +3,15 @@ clc, close all, clear all
 fs = 5;
 lo_up = 10;
 flo = 1;
-oversampl = 2;
+oversampl = 3;
 
 rrcos_filt_len = 8;
-rrcos_filt_beta = 0.5;
+rrcos_filt_beta = 0.25;
 rrcos_filt = rcosdesign(rrcos_filt_beta, rrcos_filt_len, oversampl);
 
-bits_per_symb = 6;
+bits_per_symb = 4;
 bits_per_item = 8;
-data_count = 20000;
+data_count = 500;
 data = randi(2^bits_per_item, 1, data_count) - 1;
 barker_code13 = [+1 +1 +1 +1 +1 -1 -1 +1 +1 -1 +1 -1 +1];
 barker_symbs = (1+i)*barker_code13;
@@ -33,7 +33,6 @@ packet = [packet_header symbs];
 the_num = randi(1000) + 10;
 some_random_offset = zeros(1, the_num * lo_up * fs);
 data_recieved = awgn([some_random_offset data_to_send], 30);
-df = 1+1e-5;
 some_phase = 2*pi*(rand()-0.5);
 
 % plot fft
@@ -41,20 +40,18 @@ l = length(data_recieved);
 freqdomain = fft(data_recieved)/l;
 frequency_axis = linspace(0,fs/2,l/2+1);
 PSD = abs(freqdomain(1:l/2+1));
-plot(frequency_axis, PSD)
 frequency_width = (1+rrcos_filt_beta)/lo_up/oversampl;
 frequency_width_corr = ones(1, floor(l*frequency_width/fs/2));
 slope_len = floor(frequency_width/2);
 frequency_width_corr(1:slope_len) = linspace(0,1,slope_len);
 frequency_width_corr(end-slope_len+1:end) = linspace(1,0,slope_len);
 the_corr_in_f = xcorr(frequency_width_corr, PSD);
-figure
-plot(the_corr_in_f)
 f_inds = find(the_corr_in_f>max(the_corr_in_f)/5);
 lo_guess_frequency_index = floor((f_inds(1) + f_inds(end))/2);
 flo_guess = frequency_axis(length(PSD)-lo_guess_frequency_index+floor(length(frequency_width_corr)/2));
-lo_diff_f = flo_guess-flo
+lo_diff_f = flo_guess-flo;
 
+flo_guess = flo; %cheating with f corr
 t_rx = 0:1/fs:((length(data_recieved)-1)/fs);
 lo_i = sin(2*pi*flo_guess*t_rx+some_phase);
 lo_q = cos(2*pi*flo_guess*t_rx+some_phase);
@@ -68,10 +65,42 @@ rx_high_sample_shift = rx_high_sample(2:end-1);
 abs_corr = abs(xcorr(rx_high_sample_shift, barker_symbs_up));
 [v, corr_max_index] = max(abs_corr);
 packet_offset = corr_max_index-length(rx_high_sample_shift);
-rx_high_sample_shift_packet = rx_high_sample_shift((packet_offset+1):end);
+rx_high = rx_high_sample_shift((packet_offset+1):end);
 
-rx = upfirdn(rrcos_filt, rx_high_sample_shift_packet, 1, oversampl);
-rx_shift = rx((rrcos_filt_len + 1):(end - rrcos_filt_len));
+% now lets try a gardner
+rx_low = zeros(1, ceil(length(rx_high) / oversampl));
+interp_point = 0;
+
+gardner_loop_ki = 0.1;
+gardner_loop_kp = 0.01;
+gardner_loop_i = interp_point;
+
+rx_high_filtered = filter(rrcos_filt, 1, rx_high);
+interppoints = zeros(size(rx_low));
+
+for i = 2:length(rx_low)-1
+    rx_low(i) = interp1([-1, 0, 1], rx_high_filtered(3*i-2:3*i), interp_point);
+    
+    gardner_error = (rx_high_filtered(3*i) - rx_high_filtered(3*i-2)) * rx_high_filtered(3*i-1);
+    gardner_loop_p = gardner_loop_kp * gardner_error;
+    gardner_loop_i = gardner_loop_ki * gardner_error + gardner_loop_i;
+    gardner_loop = gardner_loop_p + gardner_loop_i;
+    interp_point = real(gardner_loop) + imag(gardner_loop);
+    interppoints(i) = interp_point;
+end
+
+hold on
+plot(interppoints)
+
+rx1 = downsample(rx_high_filtered, oversampl);
+rx = upfirdn(rx_high, rrcos_filt, 1, oversampl);
+figure
+hold on
+plot(rx1, 'o')
+plot(rx_low, '*')
+
+%rx_shift = rx((rrcos_filt_len + 1):(end - rrcos_filt_len));
+rx_shift = rx_low((rrcos_filt_len + 1):end-1);
 
 rx_without_header = rx_shift(length(packet_header)+1:end);
 rx_header = rx_shift(1:length(barker_symbs));
@@ -87,7 +116,7 @@ phase_error = header_phase_error_fit(2) + header_phase_error_fit(1) * header_len
 symbs_rx = rx_without_header * gain_comp;
 
 rx_bin_symbs = zeros(size(symbs));
-phase_error_coeff = 0.2;
+phase_error_coeff = 0.1;
 measured_symbs = zeros(size(symbs_rx));
 phase_errors = zeros(size(symbs_rx));
 last_phase_error = header_phase_error_fit(2) + header_phase_error_fit(1) * (header_len - 1);
